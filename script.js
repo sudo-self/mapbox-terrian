@@ -116,30 +116,29 @@ function loadAirplane() {
     const loader = new THREE.GLTFLoader();
     
     loader.load(
-        'airplane.glb',  // CORRECTED FILENAME
+        './airplane.glb',
         (gltf) => {
             updateStatus("Airplane model loaded!");
             
             planeObject = gltf.scene;
             
             // Log model info for debugging
-            console.log("Model loaded:", planeObject);
-            console.log("Number of children:", planeObject.children.length);
+            console.log("Model loaded successfully");
+            console.log("Model children:", planeObject.children.length);
             
-            // Center and normalize the model
+            // Get bounding box to understand model size
             const bbox = new THREE.Box3().setFromObject(planeObject);
             const center = bbox.getCenter(new THREE.Vector3());
             const size = bbox.getSize(new THREE.Vector3());
             
-            console.log("Model bounding box:", bbox);
             console.log("Model size:", size);
             console.log("Model center:", center);
             
-            // Center the model
+            // Center the model at origin
             planeObject.position.sub(center);
             
-            // Scale - START VERY SMALL and adjust as needed
-            const scale = 0.0001;  // Start with tiny scale
+            // Try different scales - start small and increase
+            const scale = 0.001;  // Better starting scale
             planeObject.scale.set(scale, scale, scale);
             
             // Position at initial location
@@ -160,26 +159,27 @@ function loadAirplane() {
             planeObject.rotation.y = Math.PI;  // Facing north (180°)
             planeObject.rotation.z = 0;        // No roll
             
-            // Make all materials visible
+            // Make all materials more visible
             planeObject.traverse((child) => {
                 if (child.isMesh) {
-                    console.log("Found mesh:", child.name);
+                    console.log("Mesh found:", child.name);
                     
-                    // Force material to be visible
                     if (child.material) {
-                        // Make material brighter
+                        // Brighten the material
                         if (child.material.color) {
-                            child.material.color.multiplyScalar(2); // Brighten
+                            child.material.color.multiplyScalar(1.5);
                         }
                         
-                        // Ensure it's not transparent
+                        // Ensure it's visible
                         child.material.transparent = false;
                         child.material.opacity = 1.0;
                         child.material.needsUpdate = true;
                         
-                        // Add emissive for visibility
-                        child.material.emissive = new THREE.Color(0x222222);
-                        child.material.emissiveIntensity = 0.2;
+                        // Add some emissive glow for better visibility
+                        if (!child.material.emissive) {
+                            child.material.emissive = new THREE.Color(0x333333);
+                            child.material.emissiveIntensity = 0.3;
+                        }
                     }
                 }
             });
@@ -200,13 +200,12 @@ function loadAirplane() {
                 bearing: 0,
                 duration: 2000
             });
-            
-            // Debug: Add a visible marker at plane position
-            addDebugMarker(mercatorCoord);
         },
         (progress) => {
             const percent = Math.round((progress.loaded / progress.total) * 100);
-            updateStatus(`Loading airplane: ${percent}%`);
+            if (percent % 25 === 0) { // Update less frequently
+                updateStatus(`Loading airplane: ${percent}%`);
+            }
         },
         (error) => {
             updateStatus(`Error: ${error.message}`);
@@ -214,22 +213,6 @@ function loadAirplane() {
             createVisibleFallback();
         }
     );
-}
-
-function addDebugMarker(position) {
-    // Add a visible red sphere at airplane position
-    const geometry = new THREE.SphereGeometry(0.0003, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        transparent: true,
-        opacity: 0.8
-    });
-    const marker = new THREE.Mesh(geometry, material);
-    
-    marker.position.copy(position);
-    scene.add(marker);
-    
-    console.log("Debug marker at:", position);
 }
 
 function createVisibleFallback() {
@@ -241,11 +224,11 @@ function createVisibleFallback() {
     // Fuselage (cylinder)
     const fuselageGeometry = new THREE.CylinderGeometry(0.0002, 0.0002, 0.001, 8);
     const fuselageMaterial = new THREE.MeshPhongMaterial({
-        color: 0xff0000, // Bright red
+        color: 0xff0000,
         shininess: 100
     });
     const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
-    fuselage.rotation.z = Math.PI / 2; // Make it horizontal
+    fuselage.rotation.z = Math.PI / 2;
     group.add(fuselage);
     
     // Wings
@@ -293,12 +276,6 @@ function setupAdjustmentFunctions() {
             planeObject.scale.set(scale, scale, scale);
             console.log(`Scale set to: ${scale}`);
             updateStatus(`Scale: ${scale}`);
-            
-            // Try different scales automatically
-            if (scale === 0.0001) setTimeout(() => adjustPlane.setScale(0.001), 1000);
-            if (scale === 0.001) setTimeout(() => adjustPlane.setScale(0.01), 1000);
-            if (scale === 0.01) setTimeout(() => adjustPlane.setScale(0.1), 1000);
-            if (scale === 0.1) setTimeout(() => adjustPlane.setScale(1), 1000);
         },
         
         setPosition: function(lng, lat, alt) {
@@ -312,6 +289,16 @@ function setupAdjustmentFunctions() {
             
             planeObject.position.set(coord.x, coord.y, coord.z);
             console.log(`Position: ${lng}, ${lat}, alt: ${planeAltitude}m`);
+            updateStatus(`Position updated`);
+        },
+        
+        setRotation: function(x, y, z) {
+            if (!planeObject) return;
+            if (x !== undefined) planeObject.rotation.x = x;
+            if (y !== undefined) planeObject.rotation.y = y;
+            if (z !== undefined) planeObject.rotation.z = z;
+            console.log(`Rotation set to: X=${x}, Y=${y}, Z=${z}`);
+            updateStatus(`Rotation updated`);
         },
         
         logInfo: function() {
@@ -326,9 +313,6 @@ function setupAdjustmentFunctions() {
             console.log("Altitude:", planeAltitude);
         }
     };
-    
-    // Auto-try different scales
-    setTimeout(() => adjustPlane.setScale(0.0001), 1000);
 }
 
 // Smooth animation loop
@@ -385,6 +369,16 @@ function startAnimationLoop() {
                 moved = true;
             }
             
+            // Pitch up/down
+            if (keysPressed['r']) {
+                planeObject.rotation.x += rotationSpeed * 0.5;
+                moved = true;
+            }
+            if (keysPressed['f']) {
+                planeObject.rotation.x -= rotationSpeed * 0.5;
+                moved = true;
+            }
+            
             // Smooth camera follow
             if (moved) {
                 const mercatorCoord = new mapboxgl.MercatorCoordinate(
@@ -409,24 +403,42 @@ function startAnimationLoop() {
     animate();
 }
 
-// Button controls (for smooth movement)
+// Button controls (updated for smooth movement)
 function movePlane(direction) {
-    if (!planeObject) return;
+    if (!planeObject) {
+        updateStatus("Plane not loaded!");
+        return;
+    }
     
-    // For button clicks, add to keysPressed briefly
-    keysPressed[direction] = true;
-    setTimeout(() => {
-        keysPressed[direction] = false;
-    }, 100);
+    // Map direction to key for smooth movement
+    const keyMap = {
+        'forward': 'w',
+        'backward': 's',
+        'left': 'a',
+        'right': 'd',
+        'up': 'q',
+        'down': 'e'
+    };
+    
+    if (keyMap[direction]) {
+        keysPressed[keyMap[direction]] = true;
+        setTimeout(() => {
+            keysPressed[keyMap[direction]] = false;
+        }, 200); // Longer duration for button presses
+    }
 }
 
 function rotatePlane(direction) {
-    if (!planeObject) return;
+    if (!planeObject) {
+        updateStatus("Plane not loaded!");
+        return;
+    }
     
-    keysPressed[direction === 'left' ? 'z' : 'c'] = true;
+    const key = direction === 'left' ? 'z' : 'c';
+    keysPressed[key] = true;
     setTimeout(() => {
-        keysPressed[direction === 'left' ? 'z' : 'c'] = false;
-    }, 100);
+        keysPressed[key] = false;
+    }, 200);
 }
 
 function resetPlane() {
@@ -458,18 +470,35 @@ function resetPlane() {
         duration: 1000
     });
     
-    updateStatus("Airplane reset");
+    updateStatus("Airplane reset to start position");
 }
 
 // Keyboard event listeners
 document.addEventListener('keydown', (e) => {
-    keysPressed[e.key] = true;
+    e.preventDefault(); // Prevent default browser behavior
+    keysPressed[e.key.toLowerCase()] = true;
 });
 
 document.addEventListener('keyup', (e) => {
-    keysPressed[e.key] = false;
+    keysPressed[e.key.toLowerCase()] = false;
 });
+
+// Helper function to check if airplane.glb exists
+function checkAirplaneFile() {
+    fetch('./airplane.glb')
+        .then(response => {
+            if (response.ok) {
+                updateStatus("airplane.glb file found");
+            } else {
+                updateStatus("airplane.glb not found, will create fallback");
+            }
+        })
+        .catch(() => {
+            updateStatus("airplane.glb not found, will create fallback");
+        });
+}
 
 // Initialize
 updateStatus("Starting 3D map with airplane...");
+checkAirplaneFile();
 initMap();
