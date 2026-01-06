@@ -50,7 +50,7 @@ function updateFlightInfo() {
     `;
 }
 
-// Initialize map
+// Initialize map WITHOUT terrain control
 function initMap() {
     map = new mapboxgl.Map({
         container: "map",
@@ -59,8 +59,27 @@ function initMap() {
         pitch: 80,
         bearing: 41,
         style: "mapbox://styles/mapbox/standard-satellite",
-        antialias: true
+        antialias: true,
+        // Disable default controls
+        attributionControl: false
     });
+
+    // Remove any default controls that might appear
+    setTimeout(() => {
+        // Remove terrain control if it exists
+        const terrainControl = document.querySelector('.mapboxgl-ctrl-terrain');
+        if (terrainControl) {
+            terrainControl.remove();
+        }
+        
+        // Remove any other controls
+        const controls = document.querySelectorAll('.mapboxgl-ctrl');
+        controls.forEach(ctrl => {
+            if (!ctrl.closest('#info-panel')) { // Don't remove our info panel
+                ctrl.remove();
+            }
+        });
+    }, 100);
 
     map.on("load", () => {
         updateStatus("Map loaded, adding terrain...");
@@ -154,8 +173,8 @@ function loadAirplane() {
             // Center the model
             planeObject.position.sub(center);
             
-            // Scale
-            const scale = 0.01;
+            // Scale - try different values if needed
+            const scale = 0.1; // Increased scale for better visibility
             planeObject.scale.set(scale, scale, scale);
             
             // Position at initial location
@@ -171,34 +190,33 @@ function loadAirplane() {
                 mercatorCoord.z
             );
             
-            // FIXED: Rotate 180 degrees so camera is behind the plane, not at nose
-            planeObject.rotation.x = 0;        // Level flight
-            planeObject.rotation.y = 0;        // Facing east initially (180° flipped)
-            planeObject.rotation.z = 0;        // No banking
+            // Camera is behind plane
+            planeObject.rotation.x = 0;
+            planeObject.rotation.y = 0;
+            planeObject.rotation.z = 0;
             
             // Make materials more visible
             planeObject.traverse((child) => {
                 if (child.isMesh && child.material) {
                     if (child.material.color) {
-                        child.material.color.multiplyScalar(1.3);
+                        child.material.color.multiplyScalar(2.0); // Brighten more
                     }
                     child.material.transparent = false;
                     child.material.opacity = 1.0;
                     child.material.needsUpdate = true;
                     
-                    if (!child.material.emissive) {
-                        child.material.emissive = new THREE.Color(0x111111);
-                        child.material.emissiveIntensity = 0.1;
-                    }
+                    // Add glow for visibility
+                    child.material.emissive = new THREE.Color(0x333333);
+                    child.material.emissiveIntensity = 0.3;
                 }
             });
             
             scene.add(planeObject);
-            updateStatus("Airplane ready! Use WASD or Arrow keys");
+            updateStatus("Airplane ready! WASD/Arrows to fly");
             
             setupConsoleCommands();
             
-            // Center on plane with proper camera orientation
+            // Center on plane
             map.flyTo({
                 center: lngLat,
                 zoom: 14,
@@ -226,25 +244,25 @@ function createVisibleFallback() {
     
     const group = new THREE.Group();
     
-    // Fuselage
-    const fuselageGeometry = new THREE.CylinderGeometry(0.0003, 0.0003, 0.002, 8);
-    const fuselageMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+    // Larger, more visible fallback plane
+    const fuselageGeometry = new THREE.CylinderGeometry(0.001, 0.001, 0.004, 8);
+    const fuselageMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.3
+    });
     const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
     fuselage.rotation.z = Math.PI / 2;
     group.add(fuselage);
     
-    // Wings
-    const wingGeometry = new THREE.BoxGeometry(0.002, 0.0001, 0.0006);
-    const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+    const wingGeometry = new THREE.BoxGeometry(0.004, 0.0002, 0.001);
+    const wingMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x00ff00,
+        emissive: 0x00ff00,
+        emissiveIntensity: 0.2
+    });
     const wing = new THREE.Mesh(wingGeometry, wingMaterial);
     group.add(wing);
-    
-    // Tail
-    const tailGeometry = new THREE.BoxGeometry(0.0004, 0.0001, 0.0003);
-    const tailMaterial = new THREE.MeshPhongMaterial({ color: 0x888888 });
-    const tail = new THREE.Mesh(tailGeometry, tailMaterial);
-    tail.position.set(-0.0008, 0, 0);
-    group.add(tail);
     
     planeObject = group;
     
@@ -260,8 +278,8 @@ function createVisibleFallback() {
         mercatorCoord.z
     );
     
-    // FIXED: Initial rotation for camera behind plane
     planeObject.rotation.y = 0;
+    planeObject.scale.set(2, 2, 2); // Make it larger
     
     scene.add(planeObject);
     updateStatus("Fallback airplane created!");
@@ -285,7 +303,7 @@ function startAnimationLoop() {
                 planeSpeed = Math.max(planeSpeed - FLIGHT_PARAMS.acceleration * deltaTime * 3, FLIGHT_PARAMS.minSpeed);
             }
             
-            // Pitch control (W/S or Up/Down arrows)
+            // Pitch control
             if (keysPressed['w'] || keysPressed['arrowup']) {
                 pitchAngle += FLIGHT_PARAMS.pitchRate * deltaTime;
             }
@@ -293,13 +311,13 @@ function startAnimationLoop() {
                 pitchAngle -= FLIGHT_PARAMS.pitchRate * deltaTime;
             }
             
-            // Bank/turn control (A/D or Left/Right arrows)
+            // Bank/turn control
             let turnInput = 0;
             if (keysPressed['a'] || keysPressed['arrowleft']) {
-                turnInput = 1; // Turn left
+                turnInput = 1;
                 bankAngle += FLIGHT_PARAMS.bankRate * deltaTime;
             } else if (keysPressed['d'] || keysPressed['arrowright']) {
-                turnInput = -1; // Turn right
+                turnInput = -1;
                 bankAngle -= FLIGHT_PARAMS.bankRate * deltaTime;
             } else {
                 bankAngle *= FLIGHT_PARAMS.autoLevel;
@@ -314,27 +332,22 @@ function startAnimationLoop() {
                 planeObject.rotation.y += (bankAngle * FLIGHT_PARAMS.turnRate * deltaTime);
             }
             
-            // Direct turning
             planeObject.rotation.y += turnInput * FLIGHT_PARAMS.turnRate * deltaTime;
-            
-            // Apply pitch and banking
             planeObject.rotation.x = pitchAngle;
             planeObject.rotation.z = -bankAngle * 0.7;
             
-            // Calculate forward movement
-            // FIXED: Since plane is rotated 180°, we need to reverse forward direction
-            const forwardX = Math.sin(planeObject.rotation.y + Math.PI); // Add 180°
-            const forwardY = Math.cos(planeObject.rotation.y + Math.PI); // Add 180°
+            // Forward movement (camera is behind plane)
+            const forwardX = Math.sin(planeObject.rotation.y + Math.PI);
+            const forwardY = Math.cos(planeObject.rotation.y + Math.PI);
             
-            // Apply forward movement
             planeObject.position.x += forwardX * planeSpeed * deltaTime * 60;
             planeObject.position.y += forwardY * planeSpeed * deltaTime * 60;
             
-            // Apply altitude change based on pitch
+            // Altitude change
             planeObject.position.z += Math.sin(pitchAngle) * planeSpeed * deltaTime * 100;
             planeAltitude += Math.sin(pitchAngle) * planeSpeed * deltaTime * 100000;
             
-            // Direct altitude controls
+            // Direct altitude
             if (keysPressed['q']) {
                 planeObject.position.z += FLIGHT_PARAMS.altitudeRate * deltaTime;
                 planeAltitude += 10 * deltaTime;
@@ -345,10 +358,10 @@ function startAnimationLoop() {
                 if (planeAltitude < 10) planeAltitude = 10;
             }
             
-            // Auto-reduce pitch over time
+            // Auto-reduce pitch
             pitchAngle *= 0.95;
             
-            // Update camera to follow plane (with 180° flip)
+            // Update camera
             updateCamera();
             
             // Update flight info
@@ -371,20 +384,18 @@ function updateCamera() {
     );
     const lngLat = mercatorCoord.toLngLat();
     
-    // Smooth camera interpolation
     const currentCenter = map.getCenter();
     const lerpFactor = 0.1;
     const newLng = currentCenter.lng + (lngLat.lng - currentCenter.lng) * lerpFactor;
     const newLat = currentCenter.lat + (lngLat.lat - currentCenter.lat) * lerpFactor;
     
-    // FIXED: Camera bearing should follow plane direction (no 180° flip needed here)
     const planeBearing = -planeObject.rotation.y * (180 / Math.PI);
     
     map.setCenter([newLng, newLat]);
     map.setBearing(planeBearing);
 }
 
-// Console commands for debugging
+// Console commands
 function setupConsoleCommands() {
     window.airplane = {
         setSpeed: function(speed) {
@@ -436,7 +447,7 @@ function setupConsoleCommands() {
             );
             
             planeObject.rotation.x = 0;
-            planeObject.rotation.y = 0; // FIXED: Camera behind plane
+            planeObject.rotation.y = 0;
             planeObject.rotation.z = 0;
             
             map.flyTo({
@@ -469,7 +480,7 @@ function setupConsoleCommands() {
     };
 }
 
-// Keyboard controls - WASD and Arrow keys both work
+// Keyboard controls
 document.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
     keysPressed[key] = true;
@@ -483,7 +494,7 @@ document.addEventListener('keydown', (e) => {
     // Reset with R key
     if (key === 'r') {
         e.preventDefault();
-        airplane.reset();
+        if (window.airplane) airplane.reset();
     }
 });
 
@@ -491,19 +502,34 @@ document.addEventListener('keyup', (e) => {
     keysPressed[e.key.toLowerCase()] = false;
 });
 
-// Display controls info
+// Clean up any Mapbox controls on page load
+window.addEventListener('load', () => {
+    // Remove Mapbox logo
+    const mapboxLogo = document.querySelector('.mapboxgl-ctrl-logo');
+    if (mapboxLogo) mapboxLogo.remove();
+    
+    // Remove attribution
+    const attributions = document.querySelectorAll('.mapboxgl-ctrl-attrib');
+    attributions.forEach(attr => attr.remove());
+    
+    // Remove any other controls
+    const controls = document.querySelectorAll('.mapboxgl-ctrl');
+    controls.forEach(ctrl => {
+        if (!ctrl.closest('#info-panel')) {
+            ctrl.remove();
+        }
+    });
+});
+
+// Console help
 console.log("=== Flight Controls ===");
-console.log("W / ↑ : Pitch up (climb)");
-console.log("S / ↓ : Pitch down (descend)");
-console.log("A / ← : Bank left (turn left)");
-console.log("D / → : Bank right (turn right)");
-console.log("Q : Increase altitude");
-console.log("E : Decrease altitude");
-console.log("Shift / Space : Boost speed");
-console.log("Ctrl : Slow down");
-console.log("R : Reset position");
+console.log("W/↑: Pitch up | S/↓: Pitch down");
+console.log("A/←: Turn left | D/→: Turn right");
+console.log("Q: Altitude up | E: Altitude down");
+console.log("Shift/Space: Boost | Ctrl: Slow");
+console.log("R: Reset position");
 console.log("");
-console.log("Console commands: airplane.info(), airplane.setSpeed(0.0001)");
+console.log("Console: airplane.info(), airplane.setSpeed(0.0001)");
 
 // Initialize
 updateStatus("Starting flight simulator...");
