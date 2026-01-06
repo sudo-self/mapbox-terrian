@@ -50,7 +50,7 @@ function updateFlightInfo() {
     `;
 }
 
-// Initialize map WITHOUT terrain control
+// Initialize map
 function initMap() {
     map = new mapboxgl.Map({
         container: "map",
@@ -60,39 +60,23 @@ function initMap() {
         bearing: 41,
         style: "mapbox://styles/mapbox/standard-satellite",
         antialias: true,
-        // Disable default controls
         attributionControl: false
     });
 
-    // Remove any default controls that might appear
-    setTimeout(() => {
-        // Remove terrain control if it exists
-        const terrainControl = document.querySelector('.mapboxgl-ctrl-terrain');
-        if (terrainControl) {
-            terrainControl.remove();
-        }
-        
-        // Remove any other controls
-        const controls = document.querySelectorAll('.mapboxgl-ctrl');
-        controls.forEach(ctrl => {
-            if (!ctrl.closest('#info-panel')) { // Don't remove our info panel
-                ctrl.remove();
-            }
-        });
-    }, 100);
-
-    map.on("load", () => {
-        updateStatus("Map loaded, adding terrain...");
-        
-        map.addSource("mapbox-dem", {
-            type: "raster-dem",
-            url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+    // Remove Mapbox logo
+    map.on('load', () => {
+        // Add terrain source
+        map.addSource('mapbox-dem', {
+            type: 'raster-dem',
+            url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
             tileSize: 512,
             maxzoom: 14
         });
         
-        map.setTerrain({ source: "mapbox-dem", exaggeration: 3.5 });
+        // Set terrain with less exaggeration for better integration
+        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
         
+        // Wait for terrain to load
         map.once('idle', () => {
             updateStatus("Terrain ready, adding plane...");
             setupThreeJS();
@@ -112,7 +96,9 @@ function setupThreeJS() {
             
             camera = new THREE.Camera();
             scene = new THREE.Scene();
-            scene.fog = new THREE.Fog(0x87CEEB, 1, 20000);
+            
+            // Use less fog to avoid covering terrain
+            scene.fog = new THREE.Fog(0x87CEEB, 500, 10000);
             
             // Add lighting
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -129,7 +115,12 @@ function setupThreeJS() {
                 alpha: true
             });
             
+            // IMPORTANT: Don't auto-clear - let Mapbox handle it
             renderer.autoClear = false;
+            renderer.autoClearDepth = false;
+            renderer.autoClearColor = false;
+            renderer.autoClearStencil = false;
+            
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.outputEncoding = THREE.sRGBEncoding;
             
@@ -138,13 +129,32 @@ function setupThreeJS() {
         },
         
         render: function(gl, matrix) {
+            // Get camera matrix from Mapbox
             camera.projectionMatrix.fromArray(matrix);
             camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
             
+            // IMPORTANT: Only clear what we need
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            
+            // Clear depth buffer for our custom layer
             gl.clear(gl.DEPTH_BUFFER_BIT);
+            
+            // Set up state for Three.js rendering
             renderer.state.reset();
+            
+            // IMPORTANT: Use correct blending for terrain integration
+            renderer.state.buffers.depth.setTest(true);
+            renderer.state.buffers.depth.setMask(true);
+            renderer.state.buffers.color.setMask(true, true, true, true);
+            
+            // Render our scene
             renderer.render(scene, camera);
             renderer.resetState();
+            
+            // IMPORTANT: Restore Mapbox's depth test
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
             
             map.triggerRepaint();
         }
@@ -170,11 +180,14 @@ function loadAirplane() {
             const center = bbox.getCenter(new THREE.Vector3());
             const size = bbox.getSize(new THREE.Vector3());
             
+            console.log("Model size:", size);
+            console.log("Model center:", center);
+            
             // Center the model
             planeObject.position.sub(center);
             
-            // Scale - try different values if needed
-            const scale = 0.1; // Increased scale for better visibility
+            // Scale - adjust based on model size
+            const scale = size.length() > 0.1 ? 0.01 : 0.1;
             planeObject.scale.set(scale, scale, scale);
             
             // Position at initial location
@@ -195,19 +208,23 @@ function loadAirplane() {
             planeObject.rotation.y = 0;
             planeObject.rotation.z = 0;
             
-            // Make materials more visible
+            // Make materials more visible but keep them realistic
             planeObject.traverse((child) => {
                 if (child.isMesh && child.material) {
                     if (child.material.color) {
-                        child.material.color.multiplyScalar(2.0); // Brighten more
+                        child.material.color.multiplyScalar(1.5);
                     }
                     child.material.transparent = false;
                     child.material.opacity = 1.0;
                     child.material.needsUpdate = true;
                     
-                    // Add glow for visibility
-                    child.material.emissive = new THREE.Color(0x333333);
-                    child.material.emissiveIntensity = 0.3;
+                    // Less emissive to avoid glowing effect
+                    child.material.emissive = new THREE.Color(0x111111);
+                    child.material.emissiveIntensity = 0.1;
+                    
+                    // Enable depth test and write
+                    child.material.depthTest = true;
+                    child.material.depthWrite = true;
                 }
             });
             
@@ -244,22 +261,22 @@ function createVisibleFallback() {
     
     const group = new THREE.Group();
     
-    // Larger, more visible fallback plane
-    const fuselageGeometry = new THREE.CylinderGeometry(0.001, 0.001, 0.004, 8);
+    // Simple airplane geometry
+    const fuselageGeometry = new THREE.CylinderGeometry(0.0005, 0.0005, 0.002, 8);
     const fuselageMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 0.3
+        color: 0xff4444,
+        depthTest: true,
+        depthWrite: true
     });
     const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
     fuselage.rotation.z = Math.PI / 2;
     group.add(fuselage);
     
-    const wingGeometry = new THREE.BoxGeometry(0.004, 0.0002, 0.001);
+    const wingGeometry = new THREE.BoxGeometry(0.002, 0.0001, 0.001);
     const wingMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x00ff00,
-        emissive: 0x00ff00,
-        emissiveIntensity: 0.2
+        color: 0x44ff44,
+        depthTest: true,
+        depthWrite: true
     });
     const wing = new THREE.Mesh(wingGeometry, wingMaterial);
     group.add(wing);
@@ -279,7 +296,7 @@ function createVisibleFallback() {
     );
     
     planeObject.rotation.y = 0;
-    planeObject.scale.set(2, 2, 2); // Make it larger
+    planeObject.scale.set(1, 1, 1);
     
     scene.add(planeObject);
     updateStatus("Fallback airplane created!");
@@ -355,7 +372,7 @@ function startAnimationLoop() {
             if (keysPressed['e']) {
                 planeObject.position.z -= FLIGHT_PARAMS.altitudeRate * deltaTime;
                 planeAltitude -= 10 * deltaTime;
-                if (planeAltitude < 10) planeAltitude = 10;
+                if (planeAltitude < 50) planeAltitude = 50;
             }
             
             // Auto-reduce pitch
@@ -502,24 +519,20 @@ document.addEventListener('keyup', (e) => {
     keysPressed[e.key.toLowerCase()] = false;
 });
 
-// Clean up any Mapbox controls on page load
-window.addEventListener('load', () => {
+// Clean up Mapbox UI elements
+setTimeout(() => {
     // Remove Mapbox logo
-    const mapboxLogo = document.querySelector('.mapboxgl-ctrl-logo');
-    if (mapboxLogo) mapboxLogo.remove();
+    const logo = document.querySelector('.mapboxgl-ctrl-logo');
+    if (logo) logo.style.display = 'none';
     
     // Remove attribution
-    const attributions = document.querySelectorAll('.mapboxgl-ctrl-attrib');
-    attributions.forEach(attr => attr.remove());
+    const attrib = document.querySelector('.mapboxgl-ctrl-attrib');
+    if (attrib) attrib.style.display = 'none';
     
-    // Remove any other controls
-    const controls = document.querySelectorAll('.mapboxgl-ctrl');
-    controls.forEach(ctrl => {
-        if (!ctrl.closest('#info-panel')) {
-            ctrl.remove();
-        }
-    });
-});
+    // Remove terrain control specifically
+    const terrainCtrl = document.querySelector('.mapboxgl-ctrl-terrain');
+    if (terrainCtrl) terrainCtrl.style.display = 'none';
+}, 1000);
 
 // Console help
 console.log("=== Flight Controls ===");
