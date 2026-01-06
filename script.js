@@ -3,17 +3,51 @@ mapboxgl.accessToken = "pk.eyJ1Ijoic3Vkby1zZWxmIiwiYSI6ImNtanU4MW13cTNrM3czbnB2O
 // Global variables
 let map, planeObject, scene, camera, renderer;
 let planeAltitude = 1000;
+let planeSpeed = 0.00005;
+let bankAngle = 0;
+let pitchAngle = 0;
 const statusDiv = document.getElementById('status');
+const flightInfoDiv = document.getElementById('flight-info');
 
-// Smooth movement variables
+// Control variables
 let keysPressed = {};
 let animationFrameId = null;
-const movementSpeed = 0.00002;
-const rotationSpeed = 0.03;
+
+// Flight parameters
+const FLIGHT_PARAMS = {
+    acceleration: 0.000001,
+    maxSpeed: 0.0005,
+    minSpeed: 0.00001,
+    turnRate: 0.02,
+    bankRate: 0.03,
+    pitchRate: 0.01,
+    altitudeRate: 0.5,
+    autoLevel: 0.98
+};
 
 function updateStatus(message) {
     statusDiv.textContent = message;
-    console.log(message);
+}
+
+function updateFlightInfo() {
+    if (!planeObject) return;
+    
+    const mercatorCoord = new mapboxgl.MercatorCoordinate(
+        planeObject.position.x,
+        planeObject.position.y,
+        planeObject.position.z
+    );
+    const lngLat = mercatorCoord.toLngLat();
+    
+    const heading = (-planeObject.rotation.y * 180/Math.PI + 360) % 360;
+    
+    flightInfoDiv.innerHTML = `
+        <div>Altitude: <strong>${Math.round(planeAltitude)}m</strong></div>
+        <div>Speed: <strong>${(planeSpeed * 1000000).toFixed(1)}</strong></div>
+        <div>Position: <strong>${lngLat.lng.toFixed(5)}, ${lngLat.lat.toFixed(5)}</strong></div>
+        <div>Heading: <strong>${heading.toFixed(1)}°</strong></div>
+        <div>Pitch: <strong>${(pitchAngle * 180/Math.PI).toFixed(1)}°</strong></div>
+    `;
 }
 
 // Initialize map
@@ -48,7 +82,6 @@ function initMap() {
 }
 
 function setupThreeJS() {
-    // Create custom layer for 3D model
     const customLayer = {
         id: '3d-plane',
         type: 'custom',
@@ -58,21 +91,18 @@ function setupThreeJS() {
             this.map = map;
             this.gl = gl;
             
-            // Create Three.js camera
             camera = new THREE.Camera();
-            
-            // Create Three.js scene
             scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x87CEEB, 1, 20000);
             
-            // Add lighting - important for visibility!
-            const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+            // Add lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
             
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            directionalLight.position.set(0, 0, 1).normalize();
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1).normalize();
             scene.add(directionalLight);
             
-            // Create renderer
             renderer = new THREE.WebGLRenderer({
                 canvas: map.getCanvas(),
                 context: gl,
@@ -82,23 +112,17 @@ function setupThreeJS() {
             
             renderer.autoClear = false;
             renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.outputEncoding = THREE.sRGBEncoding;
             
-            // Load the plane
             loadAirplane();
-            
-            // Start animation loop
             startAnimationLoop();
         },
         
         render: function(gl, matrix) {
-            // Set camera projection matrix
             camera.projectionMatrix.fromArray(matrix);
             camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
             
-            // Clear only depth buffer
             gl.clear(gl.DEPTH_BUFFER_BIT);
-            
-            // Render scene
             renderer.state.reset();
             renderer.render(scene, camera);
             renderer.resetState();
@@ -122,23 +146,16 @@ function loadAirplane() {
             
             planeObject = gltf.scene;
             
-            // Log model info for debugging
-            console.log("Model loaded successfully");
-            console.log("Model children:", planeObject.children.length);
-            
-            // Get bounding box to understand model size
+            // Get model info
             const bbox = new THREE.Box3().setFromObject(planeObject);
             const center = bbox.getCenter(new THREE.Vector3());
             const size = bbox.getSize(new THREE.Vector3());
             
-            console.log("Model size:", size);
-            console.log("Model center:", center);
-            
-            // Center the model at origin
+            // Center the model
             planeObject.position.sub(center);
             
-            // Try different scales - start small and increase
-            const scale = 0.001;  // Better starting scale
+            // Scale
+            const scale = 0.01;
             planeObject.scale.set(scale, scale, scale);
             
             // Position at initial location
@@ -154,45 +171,34 @@ function loadAirplane() {
                 mercatorCoord.z
             );
             
-            // Set initial rotation - airplane should be level and facing north
-            planeObject.rotation.x = 0;        // Level (no pitch)
-            planeObject.rotation.y = Math.PI;  // Facing north (180°)
-            planeObject.rotation.z = 0;        // No roll
+            // FIXED: Rotate 180 degrees so camera is behind the plane, not at nose
+            planeObject.rotation.x = 0;        // Level flight
+            planeObject.rotation.y = 0;        // Facing east initially (180° flipped)
+            planeObject.rotation.z = 0;        // No banking
             
-            // Make all materials more visible
+            // Make materials more visible
             planeObject.traverse((child) => {
-                if (child.isMesh) {
-                    console.log("Mesh found:", child.name);
+                if (child.isMesh && child.material) {
+                    if (child.material.color) {
+                        child.material.color.multiplyScalar(1.3);
+                    }
+                    child.material.transparent = false;
+                    child.material.opacity = 1.0;
+                    child.material.needsUpdate = true;
                     
-                    if (child.material) {
-                        // Brighten the material
-                        if (child.material.color) {
-                            child.material.color.multiplyScalar(1.5);
-                        }
-                        
-                        // Ensure it's visible
-                        child.material.transparent = false;
-                        child.material.opacity = 1.0;
-                        child.material.needsUpdate = true;
-                        
-                        // Add some emissive glow for better visibility
-                        if (!child.material.emissive) {
-                            child.material.emissive = new THREE.Color(0x333333);
-                            child.material.emissiveIntensity = 0.3;
-                        }
+                    if (!child.material.emissive) {
+                        child.material.emissive = new THREE.Color(0x111111);
+                        child.material.emissiveIntensity = 0.1;
                     }
                 }
             });
             
-            // Add to scene
             scene.add(planeObject);
+            updateStatus("Airplane ready! Use WASD or Arrow keys");
             
-            updateStatus(`Airplane added! Scale: ${scale}`);
+            setupConsoleCommands();
             
-            // Setup adjustment functions
-            setupAdjustmentFunctions();
-            
-            // Center map on airplane
+            // Center on plane with proper camera orientation
             map.flyTo({
                 center: lngLat,
                 zoom: 14,
@@ -203,13 +209,13 @@ function loadAirplane() {
         },
         (progress) => {
             const percent = Math.round((progress.loaded / progress.total) * 100);
-            if (percent % 25 === 0) { // Update less frequently
-                updateStatus(`Loading airplane: ${percent}%`);
+            if (percent % 25 === 0) {
+                updateStatus(`Loading: ${percent}%`);
             }
         },
         (error) => {
-            updateStatus(`Error: ${error.message}`);
-            console.error("Failed to load airplane.glb:", error);
+            updateStatus(`Error loading: ${error.message}`);
+            console.error("GLTF Error:", error);
             createVisibleFallback();
         }
     );
@@ -218,35 +224,30 @@ function loadAirplane() {
 function createVisibleFallback() {
     updateStatus("Creating visible airplane...");
     
-    // Create a simple but visible airplane
     const group = new THREE.Group();
     
-    // Fuselage (cylinder)
-    const fuselageGeometry = new THREE.CylinderGeometry(0.0002, 0.0002, 0.001, 8);
-    const fuselageMaterial = new THREE.MeshPhongMaterial({
-        color: 0xff0000,
-        shininess: 100
-    });
+    // Fuselage
+    const fuselageGeometry = new THREE.CylinderGeometry(0.0003, 0.0003, 0.002, 8);
+    const fuselageMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
     const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
     fuselage.rotation.z = Math.PI / 2;
     group.add(fuselage);
     
     // Wings
-    const wingGeometry = new THREE.BoxGeometry(0.001, 0.00005, 0.0003);
-    const wingMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+    const wingGeometry = new THREE.BoxGeometry(0.002, 0.0001, 0.0006);
+    const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
     const wing = new THREE.Mesh(wingGeometry, wingMaterial);
     group.add(wing);
     
     // Tail
-    const tailGeometry = new THREE.BoxGeometry(0.0002, 0.00005, 0.0002);
-    const tailMaterial = new THREE.MeshPhongMaterial({ color: 0x0000ff });
+    const tailGeometry = new THREE.BoxGeometry(0.0004, 0.0001, 0.0003);
+    const tailMaterial = new THREE.MeshPhongMaterial({ color: 0x888888 });
     const tail = new THREE.Mesh(tailGeometry, tailMaterial);
-    tail.position.z = -0.0004;
+    tail.position.set(-0.0008, 0, 0);
     group.add(tail);
     
     planeObject = group;
     
-    // Position it
     const lngLat = [-105.0116, 39.4424];
     const mercatorCoord = mapboxgl.MercatorCoordinate.fromLngLat(
         lngLat,
@@ -259,246 +260,251 @@ function createVisibleFallback() {
         mercatorCoord.z
     );
     
-    // Rotate to face north
-    planeObject.rotation.y = Math.PI;
+    // FIXED: Initial rotation for camera behind plane
+    planeObject.rotation.y = 0;
     
     scene.add(planeObject);
     updateStatus("Fallback airplane created!");
     
-    setupAdjustmentFunctions();
+    setupConsoleCommands();
 }
 
-// Setup adjustment functions (for browser console)
-function setupAdjustmentFunctions() {
-    window.adjustPlane = {
-        setScale: function(scale) {
-            if (!planeObject) return;
-            planeObject.scale.set(scale, scale, scale);
-            console.log(`Scale set to: ${scale}`);
-            updateStatus(`Scale: ${scale}`);
-        },
-        
-        setPosition: function(lng, lat, alt) {
-            if (!planeObject) return;
-            if (alt !== undefined) planeAltitude = alt;
-            
-            const coord = mapboxgl.MercatorCoordinate.fromLngLat(
-                [lng, lat],
-                planeAltitude
-            );
-            
-            planeObject.position.set(coord.x, coord.y, coord.z);
-            console.log(`Position: ${lng}, ${lat}, alt: ${planeAltitude}m`);
-            updateStatus(`Position updated`);
-        },
-        
-        setRotation: function(x, y, z) {
-            if (!planeObject) return;
-            if (x !== undefined) planeObject.rotation.x = x;
-            if (y !== undefined) planeObject.rotation.y = y;
-            if (z !== undefined) planeObject.rotation.z = z;
-            console.log(`Rotation set to: X=${x}, Y=${y}, Z=${z}`);
-            updateStatus(`Rotation updated`);
-        },
-        
-        logInfo: function() {
-            if (!planeObject) {
-                console.log("No airplane loaded");
-                return;
-            }
-            console.log("=== Airplane Info ===");
-            console.log("Position:", planeObject.position);
-            console.log("Rotation:", planeObject.rotation);
-            console.log("Scale:", planeObject.scale);
-            console.log("Altitude:", planeAltitude);
-        }
-    };
-}
-
-// Smooth animation loop
+// Flight physics and controls
 function startAnimationLoop() {
-    function animate() {
-        if (planeObject) {
-            // Apply smooth continuous movement
-            let moved = false;
-            
-            // Forward/Backward
-            if (keysPressed['w'] || keysPressed['ArrowUp']) {
-                planeObject.position.x += Math.sin(planeObject.rotation.y) * movementSpeed;
-                planeObject.position.y += Math.cos(planeObject.rotation.y) * movementSpeed;
-                moved = true;
-            }
-            if (keysPressed['s'] || keysPressed['ArrowDown']) {
-                planeObject.position.x -= Math.sin(planeObject.rotation.y) * movementSpeed;
-                planeObject.position.y -= Math.cos(planeObject.rotation.y) * movementSpeed;
-                moved = true;
+    let lastTime = performance.now();
+    
+    function animate(currentTime) {
+        const deltaTime = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
+        
+        if (planeObject && deltaTime > 0) {
+            // Speed control
+            if (keysPressed['shift'] || keysPressed[' ']) {
+                planeSpeed = Math.min(planeSpeed + FLIGHT_PARAMS.acceleration * deltaTime * 5, FLIGHT_PARAMS.maxSpeed * 2);
+            } else if (keysPressed['control']) {
+                planeSpeed = Math.max(planeSpeed - FLIGHT_PARAMS.acceleration * deltaTime * 3, FLIGHT_PARAMS.minSpeed);
             }
             
-            // Strafe Left/Right
-            if (keysPressed['a'] || keysPressed['ArrowLeft']) {
-                planeObject.position.x += Math.cos(planeObject.rotation.y) * movementSpeed;
-                planeObject.position.y -= Math.sin(planeObject.rotation.y) * movementSpeed;
-                moved = true;
+            // Pitch control (W/S or Up/Down arrows)
+            if (keysPressed['w'] || keysPressed['arrowup']) {
+                pitchAngle += FLIGHT_PARAMS.pitchRate * deltaTime;
             }
-            if (keysPressed['d'] || keysPressed['ArrowRight']) {
-                planeObject.position.x -= Math.cos(planeObject.rotation.y) * movementSpeed;
-                planeObject.position.y += Math.sin(planeObject.rotation.y) * movementSpeed;
-                moved = true;
+            if (keysPressed['s'] || keysPressed['arrowdown']) {
+                pitchAngle -= FLIGHT_PARAMS.pitchRate * deltaTime;
             }
             
-            // Up/Down
+            // Bank/turn control (A/D or Left/Right arrows)
+            let turnInput = 0;
+            if (keysPressed['a'] || keysPressed['arrowleft']) {
+                turnInput = 1; // Turn left
+                bankAngle += FLIGHT_PARAMS.bankRate * deltaTime;
+            } else if (keysPressed['d'] || keysPressed['arrowright']) {
+                turnInput = -1; // Turn right
+                bankAngle -= FLIGHT_PARAMS.bankRate * deltaTime;
+            } else {
+                bankAngle *= FLIGHT_PARAMS.autoLevel;
+            }
+            
+            // Limit angles
+            bankAngle = Math.max(Math.min(bankAngle, Math.PI / 4), -Math.PI / 4);
+            pitchAngle = Math.max(Math.min(pitchAngle, Math.PI / 3), -Math.PI / 3);
+            
+            // Apply turning
+            if (Math.abs(bankAngle) > 0.01) {
+                planeObject.rotation.y += (bankAngle * FLIGHT_PARAMS.turnRate * deltaTime);
+            }
+            
+            // Direct turning
+            planeObject.rotation.y += turnInput * FLIGHT_PARAMS.turnRate * deltaTime;
+            
+            // Apply pitch and banking
+            planeObject.rotation.x = pitchAngle;
+            planeObject.rotation.z = -bankAngle * 0.7;
+            
+            // Calculate forward movement
+            // FIXED: Since plane is rotated 180°, we need to reverse forward direction
+            const forwardX = Math.sin(planeObject.rotation.y + Math.PI); // Add 180°
+            const forwardY = Math.cos(planeObject.rotation.y + Math.PI); // Add 180°
+            
+            // Apply forward movement
+            planeObject.position.x += forwardX * planeSpeed * deltaTime * 60;
+            planeObject.position.y += forwardY * planeSpeed * deltaTime * 60;
+            
+            // Apply altitude change based on pitch
+            planeObject.position.z += Math.sin(pitchAngle) * planeSpeed * deltaTime * 100;
+            planeAltitude += Math.sin(pitchAngle) * planeSpeed * deltaTime * 100000;
+            
+            // Direct altitude controls
             if (keysPressed['q']) {
-                planeObject.position.z += movementSpeed * 10;
-                planeAltitude += 10;
-                moved = true;
+                planeObject.position.z += FLIGHT_PARAMS.altitudeRate * deltaTime;
+                planeAltitude += 10 * deltaTime;
             }
             if (keysPressed['e']) {
-                planeObject.position.z -= movementSpeed * 10;
-                planeAltitude -= 10;
+                planeObject.position.z -= FLIGHT_PARAMS.altitudeRate * deltaTime;
+                planeAltitude -= 10 * deltaTime;
                 if (planeAltitude < 10) planeAltitude = 10;
-                moved = true;
             }
             
-            // Rotation
-            if (keysPressed['z']) {
-                planeObject.rotation.y += rotationSpeed;
-                moved = true;
-            }
-            if (keysPressed['c']) {
-                planeObject.rotation.y -= rotationSpeed;
-                moved = true;
-            }
+            // Auto-reduce pitch over time
+            pitchAngle *= 0.95;
             
-            // Pitch up/down
-            if (keysPressed['r']) {
-                planeObject.rotation.x += rotationSpeed * 0.5;
-                moved = true;
-            }
-            if (keysPressed['f']) {
-                planeObject.rotation.x -= rotationSpeed * 0.5;
-                moved = true;
-            }
+            // Update camera to follow plane (with 180° flip)
+            updateCamera();
             
-            // Smooth camera follow
-            if (moved) {
-                const mercatorCoord = new mapboxgl.MercatorCoordinate(
-                    planeObject.position.x,
-                    planeObject.position.y,
-                    planeObject.position.z
-                );
-                const lngLat = mercatorCoord.toLngLat();
-                
-                // Smooth interpolation for camera
-                const currentCenter = map.getCenter();
-                const newLng = currentCenter.lng + (lngLat.lng - currentCenter.lng) * 0.05;
-                const newLat = currentCenter.lat + (lngLat.lat - currentCenter.lat) * 0.05;
-                
-                map.setCenter([newLng, newLat]);
-            }
+            // Update flight info
+            updateFlightInfo();
         }
         
         animationFrameId = requestAnimationFrame(animate);
     }
     
-    animate();
+    animate(performance.now());
 }
 
-// Button controls (updated for smooth movement)
-function movePlane(direction) {
-    if (!planeObject) {
-        updateStatus("Plane not loaded!");
-        return;
-    }
-    
-    // Map direction to key for smooth movement
-    const keyMap = {
-        'forward': 'w',
-        'backward': 's',
-        'left': 'a',
-        'right': 'd',
-        'up': 'q',
-        'down': 'e'
-    };
-    
-    if (keyMap[direction]) {
-        keysPressed[keyMap[direction]] = true;
-        setTimeout(() => {
-            keysPressed[keyMap[direction]] = false;
-        }, 200); // Longer duration for button presses
-    }
-}
-
-function rotatePlane(direction) {
-    if (!planeObject) {
-        updateStatus("Plane not loaded!");
-        return;
-    }
-    
-    const key = direction === 'left' ? 'z' : 'c';
-    keysPressed[key] = true;
-    setTimeout(() => {
-        keysPressed[key] = false;
-    }, 200);
-}
-
-function resetPlane() {
+function updateCamera() {
     if (!planeObject) return;
     
-    const initialLngLat = [-105.0116, 39.4424];
-    planeAltitude = 1000;
-    
-    const mercatorCoord = mapboxgl.MercatorCoordinate.fromLngLat(
-        initialLngLat,
-        planeAltitude
+    const mercatorCoord = new mapboxgl.MercatorCoordinate(
+        planeObject.position.x,
+        planeObject.position.y,
+        planeObject.position.z
     );
+    const lngLat = mercatorCoord.toLngLat();
     
-    planeObject.position.set(
-        mercatorCoord.x,
-        mercatorCoord.y,
-        mercatorCoord.z
-    );
+    // Smooth camera interpolation
+    const currentCenter = map.getCenter();
+    const lerpFactor = 0.1;
+    const newLng = currentCenter.lng + (lngLat.lng - currentCenter.lng) * lerpFactor;
+    const newLat = currentCenter.lat + (lngLat.lat - currentCenter.lat) * lerpFactor;
     
-    planeObject.rotation.x = 0;
-    planeObject.rotation.y = Math.PI;
-    planeObject.rotation.z = 0;
+    // FIXED: Camera bearing should follow plane direction (no 180° flip needed here)
+    const planeBearing = -planeObject.rotation.y * (180 / Math.PI);
     
-    map.flyTo({
-        center: initialLngLat,
-        zoom: 14,
-        pitch: 80,
-        bearing: 0,
-        duration: 1000
-    });
-    
-    updateStatus("Airplane reset to start position");
+    map.setCenter([newLng, newLat]);
+    map.setBearing(planeBearing);
 }
 
-// Keyboard event listeners
+// Console commands for debugging
+function setupConsoleCommands() {
+    window.airplane = {
+        setSpeed: function(speed) {
+            planeSpeed = speed;
+            console.log(`Speed set to: ${speed}`);
+            updateStatus(`Speed: ${(speed * 1000000).toFixed(1)}`);
+        },
+        
+        setAltitude: function(alt) {
+            planeAltitude = alt;
+            const currentPos = planeObject.position;
+            const mercatorCoord = new mapboxgl.MercatorCoordinate(
+                currentPos.x,
+                currentPos.y,
+                currentPos.z
+            );
+            const lngLat = mercatorCoord.toLngLat();
+            
+            const newCoord = mapboxgl.MercatorCoordinate.fromLngLat(
+                [lngLat.lng, lngLat.lat],
+                planeAltitude
+            );
+            
+            planeObject.position.z = newCoord.z;
+            console.log(`Altitude set to: ${alt}m`);
+        },
+        
+        setScale: function(scale) {
+            planeObject.scale.set(scale, scale, scale);
+            console.log(`Scale set to: ${scale}`);
+        },
+        
+        reset: function() {
+            const initialLngLat = [-105.0116, 39.4424];
+            planeAltitude = 1000;
+            planeSpeed = 0.00005;
+            bankAngle = 0;
+            pitchAngle = 0;
+            
+            const mercatorCoord = mapboxgl.MercatorCoordinate.fromLngLat(
+                initialLngLat,
+                planeAltitude
+            );
+            
+            planeObject.position.set(
+                mercatorCoord.x,
+                mercatorCoord.y,
+                mercatorCoord.z
+            );
+            
+            planeObject.rotation.x = 0;
+            planeObject.rotation.y = 0; // FIXED: Camera behind plane
+            planeObject.rotation.z = 0;
+            
+            map.flyTo({
+                center: initialLngLat,
+                zoom: 14,
+                pitch: 80,
+                bearing: 0,
+                duration: 1000
+            });
+            
+            console.log("Airplane reset");
+        },
+        
+        info: function() {
+            const mercatorCoord = new mapboxgl.MercatorCoordinate(
+                planeObject.position.x,
+                planeObject.position.y,
+                planeObject.position.z
+            );
+            const lngLat = mercatorCoord.toLngLat();
+            
+            console.log("=== Airplane Info ===");
+            console.log(`Position: ${lngLat.lng.toFixed(6)}, ${lngLat.lat.toFixed(6)}`);
+            console.log(`Altitude: ${Math.round(planeAltitude)}m`);
+            console.log(`Speed: ${(planeSpeed * 1000000).toFixed(1)}`);
+            console.log(`Heading: ${((-planeObject.rotation.y * 180/Math.PI + 360) % 360).toFixed(1)}°`);
+            console.log(`Pitch: ${(pitchAngle * 180/Math.PI).toFixed(1)}°`);
+            console.log(`Bank: ${(bankAngle * 180/Math.PI).toFixed(1)}°`);
+        }
+    };
+}
+
+// Keyboard controls - WASD and Arrow keys both work
 document.addEventListener('keydown', (e) => {
-    e.preventDefault(); // Prevent default browser behavior
-    keysPressed[e.key.toLowerCase()] = true;
+    const key = e.key.toLowerCase();
+    keysPressed[key] = true;
+    
+    // Prevent default for game control keys
+    if (['w', 'a', 's', 'd', 'q', 'e', ' ', 'shift', 'control', 
+        'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+        e.preventDefault();
+    }
+    
+    // Reset with R key
+    if (key === 'r') {
+        e.preventDefault();
+        airplane.reset();
+    }
 });
 
 document.addEventListener('keyup', (e) => {
     keysPressed[e.key.toLowerCase()] = false;
 });
 
-// Helper function to check if airplane.glb exists
-function checkAirplaneFile() {
-    fetch('./airplane.glb')
-        .then(response => {
-            if (response.ok) {
-                updateStatus("airplane.glb file found");
-            } else {
-                updateStatus("airplane.glb not found, will create fallback");
-            }
-        })
-        .catch(() => {
-            updateStatus("airplane.glb not found, will create fallback");
-        });
-}
+// Display controls info
+console.log("=== Flight Controls ===");
+console.log("W / ↑ : Pitch up (climb)");
+console.log("S / ↓ : Pitch down (descend)");
+console.log("A / ← : Bank left (turn left)");
+console.log("D / → : Bank right (turn right)");
+console.log("Q : Increase altitude");
+console.log("E : Decrease altitude");
+console.log("Shift / Space : Boost speed");
+console.log("Ctrl : Slow down");
+console.log("R : Reset position");
+console.log("");
+console.log("Console commands: airplane.info(), airplane.setSpeed(0.0001)");
 
 // Initialize
-updateStatus("Starting 3D map with airplane...");
-checkAirplaneFile();
+updateStatus("Starting flight simulator...");
 initMap();
