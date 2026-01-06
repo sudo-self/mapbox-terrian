@@ -17,49 +17,29 @@ body {
     bottom: 20px;
     left: 20px;
     z-index: 10;
-    background: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.9);
     padding: 15px;
     border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    max-width: 500px;
-    backdrop-filter: blur(5px);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    max-width: 400px;
 }
 
 #controls button {
-    padding: 10px 15px;
+    padding: 8px 12px;
     border: none;
-    border-radius: 5px;
-    background: linear-gradient(135deg, #007cbf, #005a8c);
+    border-radius: 4px;
+    background: #007cbf;
     color: white;
     cursor: pointer;
-    font-size: 14px;
-    transition: all 0.3s;
-    flex: 1;
-    min-width: 120px;
-    font-weight: bold;
+    font-size: 12px;
+    transition: background 0.2s;
 }
 
 #controls button:hover {
-    background: linear-gradient(135deg, #005a8c, #003d5c);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-#controls button:active {
-    transform: translateY(0);
-}
-
-#controls::before {
-    content: "✈️ Plane Controls";
-    width: 100%;
-    margin-bottom: 10px;
-    font-weight: bold;
-    color: #333;
-    font-size: 16px;
-    text-align: center;
+    background: #005a8c;
 }
 
 #status {
@@ -67,13 +47,11 @@ body {
     top: 20px;
     left: 20px;
     z-index: 10;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.7);
     color: white;
     padding: 10px 15px;
-    border-radius: 5px;
+    border-radius: 4px;
     font-family: monospace;
-    font-size: 14px;
+    font-size: 13px;
     max-width: 300px;
-    backdrop-filter: blur(5px);
-    border-left: 4px solid #007cbf;
 }

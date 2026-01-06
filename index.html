@@ -9,22 +9,20 @@
 <body>
     <div id="map"></div>
     <div id="controls">
-        <button onclick="movePlane('forward')">▲ Forward</button>
-        <button onclick="movePlane('backward')">▼ Backward</button>
-        <button onclick="movePlane('left')">◀ Left</button>
-        <button onclick="movePlane('right')">▶ Right</button>
-        <button onclick="movePlane('up')">↑ Up</button>
-        <button onclick="movePlane('down')">↓ Down</button>
-        <button onclick="rotatePlane('left')">↶ Rotate Left</button>
-        <button onclick="rotatePlane('right')">↷ Rotate Right</button>
+        <button onclick="movePlane('forward')">Forward</button>
+        <button onclick="movePlane('backward')">Backward</button>
+        <button onclick="movePlane('left')">Left</button>
+        <button onclick="movePlane('right')">Right</button>
+        <button onclick="movePlane('up')">Up</button>
+        <button onclick="movePlane('down')">Down</button>
+        <button onclick="rotatePlane('left')">Rotate Left</button>
+        <button onclick="rotatePlane('right')">Rotate Right</button>
         <button onclick="resetPlane()">Reset Position</button>
     </div>
     <div id="status">Loading...</div>
     
     <script src='https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.js'></script>
-    <!-- Use a stable version of Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Use a stable version of GLTFLoader -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="./script.js"></script>
 </body>
